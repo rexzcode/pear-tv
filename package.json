@@ -1,7 +1,7 @@
 {
   "name": "pear-tv",
   "appName": "Pear TV",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "YouTube Music on Samsung TVs through TizenBrew, with Samsung remote control navigation. A TV conversion of Pear Desktop with no plugins.",
   "packageType": "mods",
   "websiteURL": "https://music.youtube.com",

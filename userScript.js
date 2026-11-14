@@ -590,6 +590,16 @@
     return false;
   }
 
+  function exitApp() {
+    try {
+      window.tizen.application.getCurrentApplication().exit();
+      return true;
+    } catch (err) {
+      // Not on a TV, or the Tizen API is not exposed to this page.
+      return false;
+    }
+  }
+
   // ---------- Key handling ----------
 
   function isTyping() {
@@ -616,6 +626,9 @@
       case KEY.BACK:
       case KEY.ESCAPE:
         handled = goBack();
+        // On the home page with nothing open, the remote's Back closes the
+        // app, as it does in other TV apps.
+        if (!handled && code === KEY.BACK) handled = exitApp();
         break;
       case KEY.PLAY_PAUSE: togglePlay(); break;
       case KEY.PLAY: play(); break;
@@ -670,7 +683,7 @@
   }
 
   window.__pearTv = {
-    version: '0.2.1',
+    version: '0.3.0',
     move: move,
     activate: activate,
     back: goBack,
