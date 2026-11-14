@@ -18,8 +18,10 @@
   // TizenBrew sends a desktop Chrome user agent so YouTube Music accepts the
   // TV. YouTube Music then serves code written for current Chrome, and the
   // TV's engine is Chromium 85-class. These fill in the newer built-ins it
-  // is most likely to call. TizenBrew runs this file before the page's own
-  // scripts (evaluateScriptOnDocumentStart in package.json).
+  // is most likely to call. TizenBrew runs this file as soon as the page's
+  // script context exists, which is normally before the page's own scripts.
+  // (evaluateScriptOnDocumentStart would be earlier still, but TizenBrew's
+  // launch button stalls with it, so it is off.)
   function define(target, name, value) {
     if (!target || name in target) return;
     try {
@@ -668,7 +670,7 @@
   }
 
   window.__pearTv = {
-    version: '0.2.0',
+    version: '0.2.1',
     move: move,
     activate: activate,
     back: goBack,
