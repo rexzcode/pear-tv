@@ -13,6 +13,164 @@
 
   if (window.__pearTv) return;
 
+  // ---------- Polyfills ----------
+  //
+  // TizenBrew sends a desktop Chrome user agent so YouTube Music accepts the
+  // TV. YouTube Music then serves code written for current Chrome, and the
+  // TV's engine is Chromium 85-class. These fill in the newer built-ins it
+  // is most likely to call. TizenBrew runs this file before the page's own
+  // scripts (evaluateScriptOnDocumentStart in package.json).
+  function define(target, name, value) {
+    if (!target || name in target) return;
+    try {
+      Object.defineProperty(target, name, {
+        value: value, writable: true, configurable: true, enumerable: false,
+      });
+    } catch (err) {
+      // Frozen or exotic object: leave it.
+    }
+  }
+
+  function relativeIndex(length, index) {
+    var n = Math.trunc(Number(index)) || 0;
+    return n < 0 ? length + n : n;
+  }
+
+  function at(index) {
+    var i = relativeIndex(this.length, index);
+    return i < 0 || i >= this.length ? undefined : this[i];
+  }
+
+  define(Array.prototype, 'at', at);
+  define(String.prototype, 'at', at);
+  if (typeof Int8Array !== 'undefined') {
+    define(Object.getPrototypeOf(Int8Array.prototype), 'at', at);
+  }
+
+  define(Array.prototype, 'findLast', function (fn, thisArg) {
+    for (var i = this.length - 1; i >= 0; i--) {
+      if (fn.call(thisArg, this[i], i, this)) return this[i];
+    }
+    return undefined;
+  });
+  define(Array.prototype, 'findLastIndex', function (fn, thisArg) {
+    for (var i = this.length - 1; i >= 0; i--) {
+      if (fn.call(thisArg, this[i], i, this)) return i;
+    }
+    return -1;
+  });
+  define(Array.prototype, 'toReversed', function () {
+    return Array.prototype.slice.call(this).reverse();
+  });
+  define(Array.prototype, 'toSorted', function (compare) {
+    return Array.prototype.slice.call(this).sort(compare);
+  });
+  define(Array.prototype, 'toSpliced', function () {
+    var copy = Array.prototype.slice.call(this);
+    Array.prototype.splice.apply(copy, arguments);
+    return copy;
+  });
+  define(Array.prototype, 'with', function (index, value) {
+    var copy = Array.prototype.slice.call(this);
+    var i = relativeIndex(copy.length, index);
+    if (i < 0 || i >= copy.length) throw new RangeError('Invalid index');
+    copy[i] = value;
+    return copy;
+  });
+
+  define(Object, 'hasOwn', function (obj, key) {
+    return Object.prototype.hasOwnProperty.call(Object(obj), key);
+  });
+  define(Object, 'groupBy', function (items, fn) {
+    var out = Object.create(null);
+    var i = 0;
+    Array.from(items).forEach(function (item) {
+      var key = fn(item, i++);
+      (out[key] = out[key] || []).push(item);
+    });
+    return out;
+  });
+
+  define(Promise, 'withResolvers', function () {
+    var resolve;
+    var reject;
+    var promise = new this(function (res, rej) {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise: promise, resolve: resolve, reject: reject };
+  });
+
+  if (typeof Element !== 'undefined') {
+    define(Element.prototype, 'replaceChildren', function () {
+      while (this.lastChild) this.removeChild(this.lastChild);
+      if (arguments.length) this.append.apply(this, arguments);
+    });
+  }
+  if (typeof DocumentFragment !== 'undefined') {
+    define(DocumentFragment.prototype, 'replaceChildren', Element.prototype.replaceChildren);
+  }
+
+  if (typeof AbortSignal !== 'undefined' && typeof AbortController !== 'undefined') {
+    define(AbortSignal, 'timeout', function (ms) {
+      var controller = new AbortController();
+      setTimeout(function () {
+        controller.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+      }, ms);
+      return controller.signal;
+    });
+  }
+
+  if (window.crypto && window.crypto.getRandomValues) {
+    define(window.crypto, 'randomUUID', function () {
+      var b = window.crypto.getRandomValues(new Uint8Array(16));
+      b[6] = (b[6] & 0x0f) | 0x40;
+      b[8] = (b[8] & 0x3f) | 0x80;
+      var h = Array.prototype.map.call(b, function (x) {
+        return (x + 0x100).toString(16).slice(1);
+      }).join('');
+      return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' +
+        h.slice(16, 20) + '-' + h.slice(20);
+    });
+  }
+
+  // A plain deep copy. It covers the data YouTube Music passes around
+  // (objects, arrays, dates, maps, sets), not every type the real one does.
+  define(window, 'structuredClone', function (value) {
+    return clone(value, new Map());
+  });
+
+  function clone(value, seen) {
+    if (value === null || typeof value !== 'object') return value;
+    if (seen.has(value)) return seen.get(value);
+    var out;
+    if (value instanceof Date) return new Date(value.getTime());
+    if (value instanceof RegExp) return new RegExp(value.source, value.flags);
+    if (ArrayBuffer.isView(value)) return value.slice();
+    if (value instanceof ArrayBuffer) return value.slice(0);
+    if (value instanceof Map) {
+      out = new Map();
+      seen.set(value, out);
+      value.forEach(function (v, k) { out.set(clone(k, seen), clone(v, seen)); });
+      return out;
+    }
+    if (value instanceof Set) {
+      out = new Set();
+      seen.set(value, out);
+      value.forEach(function (v) { out.add(clone(v, seen)); });
+      return out;
+    }
+    out = Array.isArray(value) ? [] : {};
+    seen.set(value, out);
+    Object.keys(value).forEach(function (k) { out[k] = clone(value[k], seen); });
+    return out;
+  }
+
+  // The script is injected into every new page, including TizenBrew's own
+  // menus and YouTube Music's iframes. The polyfills above help anywhere;
+  // remote handling belongs only on the YouTube Music page itself.
+  if (window.top !== window || !/(^|\.)music\.youtube\.com$/.test(location.hostname)) return;
+
   // Samsung remote key codes. Arrows, Enter and Back are always delivered;
   // the media and channel keys must be registered first.
   var KEY = {
@@ -510,7 +668,7 @@
   }
 
   window.__pearTv = {
-    version: '0.1.0',
+    version: '0.2.0',
     move: move,
     activate: activate,
     back: goBack,
