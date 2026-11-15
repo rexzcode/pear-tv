@@ -228,6 +228,7 @@
   ].join(',');
 
   var FOCUS_CLASS = 'pear-tv-focus';
+  var POSITION_CLASS = 'pear-tv-positioned';
   var lastFocused = null;
 
   function registerRemoteKeys() {
@@ -244,19 +245,32 @@
 
   function injectStyles() {
     var css = [
-      // The focus ring is its own fixed-position layer, because YouTube
-      // Music wraps tiles in overflow:hidden boxes that clip outlines.
-      '#pear-tv-ring {',
-      '  position: fixed;',
-      '  pointer-events: none;',
-      '  z-index: 2147483647;',
-      '  border: 4px solid #ffffff;',
-      '  border-radius: 8px;',
-      '  box-shadow: 0 0 0 4px rgba(255, 0, 0, 0.7), 0 0 24px rgba(0, 0, 0, 0.8);',
-      '  transition: top 0.08s, left 0.08s, width 0.08s, height 0.08s;',
-      '  display: none;',
-      '}',
+      // The highlight is drawn inside the focused element's own box, so the
+      // overflow:hidden wrappers YouTube Music puts around tiles cannot clip
+      // it, and it takes the element's corner radius (--pear-tv-radius,
+      // measured in markFocus) so it follows the element's shape.
+      '.' + POSITION_CLASS + ' { position: relative !important; }',
       '.' + FOCUS_CLASS + ':focus { outline: none !important; }',
+      '.' + FOCUS_CLASS + '::after {',
+      '  content: "" !important;',
+      '  display: block !important;',
+      '  position: absolute !important;',
+      '  top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;',
+      '  box-sizing: border-box !important;',
+      '  border: 3px solid #ffffff !important;',
+      '  border-radius: var(--pear-tv-radius, 6px) !important;',
+      // A thin dark edge keeps the white visible on light artwork.
+      '  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.45) !important;',
+      '  background: none !important;',
+      '  opacity: 1 !important;',
+      '  transform: none !important;',
+      '  pointer-events: none !important;',
+      '  z-index: 2147483000 !important;',
+      '}',
+      // Text fields cannot show ::after, so they get a matching ring instead.
+      'input.' + FOCUS_CLASS + ', textarea.' + FOCUS_CLASS + ', select.' + FOCUS_CLASS + ' {',
+      '  box-shadow: 0 0 0 3px #ffffff !important;',
+      '}',
       // The remote has no pointer, so hover-only UI should show on focus too.
       'ytmusic-two-row-item-renderer:focus-within .ytmusic-item-thumbnail-overlay-renderer,',
       'ytmusic-responsive-list-item-renderer:focus-within ytmusic-item-thumbnail-overlay-renderer {',
@@ -269,39 +283,50 @@
     style.id = 'pear-tv-style';
     style.textContent = css;
     (document.head || document.documentElement).appendChild(style);
-
-    ring = document.createElement('div');
-    ring.id = 'pear-tv-ring';
-    document.documentElement.appendChild(ring);
   }
 
-  var ring = null;
-  var ringFrame = 0;
-
-  // Keep the ring on the focused element while the page scrolls or animates.
-  function updateRing() {
-    ringFrame = 0;
-    if (!ring) return;
-    var el = lastFocused;
-    if (!el || !document.contains(el)) {
-      ring.style.display = 'none';
-      return;
-    }
-    var r = el.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) {
-      ring.style.display = 'none';
-      return;
-    }
-    var pad = 4;
-    ring.style.display = 'block';
-    ring.style.left = (r.left - pad) + 'px';
-    ring.style.top = (r.top - pad) + 'px';
-    ring.style.width = (r.width + pad * 2) + 'px';
-    ring.style.height = (r.height + pad * 2) + 'px';
+  function hasRadius(value) {
+    return !!value && !/^0(px)?( 0(px)?)*$/.test(value.trim());
   }
 
-  function scheduleRing() {
-    if (!ringFrame) ringFrame = window.requestAnimationFrame(updateRing);
+  // The corner radius the highlight should use. Usually the element's own,
+  // but a link that wraps a rounded thumbnail has square corners itself, so
+  // look for a descendant filling the same box that has rounded corners.
+  function shapeRadius(el) {
+    var own = window.getComputedStyle(el).borderRadius;
+    if (hasRadius(own)) return own;
+    var box = el.getBoundingClientRect();
+    var queue = Array.prototype.slice.call(el.children);
+    for (var depth = 0; depth < 4 && queue.length; depth++) {
+      var next = [];
+      for (var i = 0; i < queue.length; i++) {
+        var child = queue[i];
+        var r = child.getBoundingClientRect();
+        var fills = Math.abs(r.left - box.left) < 6 && Math.abs(r.top - box.top) < 6 &&
+          Math.abs(r.right - box.right) < 6 && Math.abs(r.bottom - box.bottom) < 6;
+        if (fills) {
+          var radius = window.getComputedStyle(child).borderRadius;
+          if (hasRadius(radius)) return radius;
+        }
+        Array.prototype.push.apply(next, child.children);
+      }
+      queue = next;
+    }
+    return '';
+  }
+
+  function markFocus(el) {
+    el.classList.add(FOCUS_CLASS);
+    if (window.getComputedStyle(el).position === 'static') el.classList.add(POSITION_CLASS);
+    var radius = shapeRadius(el);
+    if (radius) el.style.setProperty('--pear-tv-radius', radius);
+    else el.style.removeProperty('--pear-tv-radius');
+  }
+
+  function unmarkFocus(el) {
+    if (!el) return;
+    el.classList.remove(FOCUS_CLASS, POSITION_CLASS);
+    el.style.removeProperty('--pear-tv-radius');
   }
 
   // ---------- Player controls (as in Pear Desktop's renderer) ----------
@@ -483,9 +508,9 @@
 
   function focus(el) {
     if (!el) return;
-    if (lastFocused) lastFocused.classList.remove(FOCUS_CLASS);
+    unmarkFocus(lastFocused);
     lastFocused = el;
-    el.classList.add(FOCUS_CLASS);
+    markFocus(el);
     if (!el.hasAttribute('tabindex') && !/^(A|BUTTON|INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
       el.setAttribute('tabindex', '-1');
     }
@@ -495,10 +520,6 @@
       el.focus();
     }
     el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    scheduleRing();
-    // Carousels scroll smoothly, so follow them for a moment.
-    setTimeout(scheduleRing, 150);
-    setTimeout(scheduleRing, 400);
   }
 
   // The first stop when nothing is focused: the item nearest the top-left of
@@ -666,10 +687,9 @@
     if (!(el instanceof Element) || el === lastFocused) return;
     var match = el.closest(FOCUSABLE);
     if (match && isRendered(match)) {
-      if (lastFocused) lastFocused.classList.remove(FOCUS_CLASS);
+      unmarkFocus(lastFocused);
       lastFocused = match;
-      match.classList.add(FOCUS_CLASS);
-      scheduleRing();
+      markFocus(match);
     }
   }
 
@@ -679,14 +699,10 @@
     // Capture phase, so YouTube Music's own key shortcuts don't run first.
     window.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('focusin', onFocusIn, true);
-    window.addEventListener('scroll', scheduleRing, true);
-    window.addEventListener('resize', scheduleRing);
-    // Page changes inside the app can remove the focused element.
-    setInterval(scheduleRing, 500);
   }
 
   window.__pearTv = {
-    version: '0.3.1',
+    version: '0.4.0',
     move: move,
     activate: activate,
     back: goBack,
