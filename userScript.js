@@ -168,10 +168,13 @@
     return out;
   }
 
-  // The script is injected into every new page, including TizenBrew's own
-  // menus and YouTube Music's iframes. The polyfills above help anywhere;
-  // remote handling belongs only on the YouTube Music page itself.
-  if (window.top !== window || !/(^|\.)music\.youtube\.com$/.test(location.hostname)) return;
+  // The script is injected into every new page, including the launcher and
+  // YouTube Music's iframes. The polyfills above help anywhere; remote
+  // handling belongs on the top-level YouTube Music page and on the Google
+  // pages that sign-in passes through, where the remote would otherwise get
+  // stuck in a text field.
+  var REMOTE_HOSTS = /(^|\.)(music\.youtube\.com|accounts\.google\.com|accounts\.youtube\.com|consent\.youtube\.com|consent\.google\.com)$/;
+  if (window.top !== window || !REMOTE_HOSTS.test(location.hostname)) return;
 
   // Samsung remote key codes. Arrows, Enter and Back are always delivered;
   // the media and channel keys must be registered first.
@@ -683,7 +686,7 @@
   }
 
   window.__pearTv = {
-    version: '0.3.0',
+    version: '0.3.1',
     move: move,
     activate: activate,
     back: goBack,
